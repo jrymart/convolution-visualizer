@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Convolution Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Tailwind gray-100 */
+        }
+        .canvas-container {
+            border: 2px dashed #d1d5db; /* Tailwind gray-300 */
+            background-color: #e5e7eb; /* Tailwind gray-200 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 200px; 
+            position: relative; 
+        }
+        .canvas-placeholder {
+            color: #6b7280; /* Tailwind gray-500 */
+            font-style: italic;
+        }
+        canvas {
+            max-width: 100%;
+            height: auto;
+            display: block; 
+            border-radius: 0.375rem; /* rounded-md */
+        }
+        
+        .kernel-weight-square {
+            width: 3.5rem; 
+            height: 3.5rem;
+            border: 1px solid #9ca3af; 
+            border-radius: 0.375rem; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative; 
+            transition: background-color 0.2s ease-in-out;
+        }
+        .kernel-input {
+            width: 100%;
+            height: 100%;
+            text-align: center;
+            font-size: 0.875rem; 
+            font-weight: 500; 
+            color: white; 
+            background-color: transparent;
+            border: none;
+            outline: none;
+            -moz-appearance: textfield; 
+        }
+        .kernel-input::-webkit-outer-spin-button,
+        .kernel-input::-webkit-inner-spin-button {
+            -webkit-appearance: none; 
+            margin: 0;
+        }
+
+        .btn {
+            transition: background-color 0.3s ease;
+        }
+        .btn-secondary {
+            background-color: #6b7280; 
+            color: white;
+        }
+        .btn-secondary:hover {
+            background-color: #4b5563; 
+        }
+        .kernel-grid-container::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .kernel-grid-container::-webkit-scrollbar-track {
+            background: #e5e7eb;
+            border-radius: 10px;
+        }
+        .kernel-grid-container::-webkit-scrollbar-thumb {
+            background: #9ca3af;
+            border-radius: 10px;
+        }
+        .kernel-grid-container::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        .checkbox-label input[type="checkbox"] {
+            margin-right: 0.5rem; /* space between checkbox and text */
+            accent-color: #3b82f6; /* Tailwind blue-500 */
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="container mx-auto max-w-6xl bg-white p-6 md:p-8 rounded-lg shadow-xl">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800">Interactive Convolution Visualizer</h1>
+            <p class="text-gray-600 mt-2">Define a kernel, see the convolution update live, and optionally apply ReLU!</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+
+            <div class="space-y-6">
+                <section>
+                    <h2 class="text-xl font-semibold text-gray-700 mb-3">1. Input Image</h2>
+                    <p class="text-sm text-gray-500 mb-2">A default image is loaded. You can upload your own:</p>
+                    <input type="file" id="imageLoader" accept="image/*" class="block w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-md file:border-0
+                        file:text-sm file:font-semibold
+                        file:bg-blue-50 file:text-blue-700
+                        hover:file:bg-blue-100 cursor-pointer
+                    ">
+                    <div id="inputCanvasContainer" class="mt-4 canvas-container rounded-md">
+                        <canvas id="inputCanvas"></canvas>
+                        <span id="inputPlaceholder" class="canvas-placeholder">Loading default image...</span>
+                    </div>
+                </section>
+
+                <section>
+                    <h2 class="text-xl font-semibold text-gray-700 mb-3">2. Configure Kernel</h2>
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label for="kernelRows" class="block text-sm font-medium text-gray-700">Rows (Odd):</label>
+                            <input type="number" id="kernelRows" value="3" min="1" max="9" step="2" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2">
+                        </div>
+                        <div>
+                            <label for="kernelCols" class="block text-sm font-medium text-gray-700">Columns (Odd):</label>
+                            <input type="number" id="kernelCols" value="3" min="1" max="9" step="2" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2">
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Kernel Weights (Edit numbers inside squares):</label>
+                        <div id="kernelGridContainer" class="kernel-grid-container p-3 bg-gray-50 border border-gray-300 rounded-md overflow-auto max-h-72">
+                            <div id="kernelGrid" class="grid gap-2 justify-center">
+                                </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button id="resetKernelButton" class="btn btn-secondary py-2 px-4 rounded-md text-sm font-medium">Reset Kernel (Identity)</button>
+                        </div>
+                </section>
+
+                <section>
+                    <h2 class="text-xl font-semibold text-gray-700 mb-3">3. Post-processing</h2>
+                    <label class="checkbox-label text-sm font-medium text-gray-700">
+                        <input type="checkbox" id="applyReluCheckbox" class="h-4 w-4 rounded border-gray-300">
+                        Apply ReLU (Rectified Linear Unit)
+                    </label>
+                </section>
+
+                <div id="messageArea" class="mt-3 text-sm text-gray-600 min-h-[1.25em]"></div>
+            </div>
+
+            <div>
+                <section>
+                    <h2 class="text-xl font-semibold text-gray-700 mb-3">Output Image</h2>
+                    <div id="outputCanvasContainer" class="canvas-container rounded-md">
+                        <canvas id="outputCanvas"></canvas>
+                        <span id="outputPlaceholder" class="canvas-placeholder">Output will appear here</span>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <footer class="mt-12 pt-8 border-t border-gray-200 text-center">
+            <p class="text-sm text-gray-500">&copy; 2025 Convolution Visualizer. Built with HTML, Tailwind CSS, and JavaScript.</p>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Canvas elements and contexts
+            const inputCanvas = document.getElementById('inputCanvas');
+            const inputCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
+            const outputCanvas = document.getElementById('outputCanvas');
+            const outputCtx = outputCanvas.getContext('2d');
+            const inputPlaceholder = document.getElementById('inputPlaceholder');
+            const outputPlaceholder = document.getElementById('outputPlaceholder');
+
+            // Input elements
+            const imageLoader = document.getElementById('imageLoader');
+            const kernelRowsInput = document.getElementById('kernelRows');
+            const kernelColsInput = document.getElementById('kernelCols');
+            const kernelGrid = document.getElementById('kernelGrid');
+            const resetKernelButton = document.getElementById('resetKernelButton');
+            // const blurKernelButton = document.getElementById('blurKernelButton'); // Removed
+            const applyReluCheckbox = document.getElementById('applyReluCheckbox');
+            const messageArea = document.getElementById('messageArea');
+
+            let originalImageData = null;
+            let debounceTimeout = null;
+            const DEBOUNCE_DELAY = 500; 
+
+            // --- Default Image ---
+            // REPLACE THIS URL with the path to your local default image if needed
+            // e.g., const defaultImageUrl = "./images/my-default-image.jpg";
+            const defaultImageUrl = "https://placehold.co/400x300/aabbcc/ffffff?text=Default+Image";
+
+            function loadAndProcessImage(src, isDefault = false) {
+                const img = new Image();
+                // If it's a local file or data URL, it might not need crossOrigin.
+                // For external URLs like placehold.co, it's often necessary for canvas operations.
+                if (src.startsWith("http")) { // A simple check for external URLs
+                    img.crossOrigin = "Anonymous"; 
+                }
+
+                img.onload = () => {
+                    const MAX_DISPLAY_WIDTH = inputCanvas.parentElement.clientWidth > 0 ? inputCanvas.parentElement.clientWidth - 4 : 400;
+                    const scale = Math.min(1, MAX_DISPLAY_WIDTH / img.width);
+                    inputCanvas.width = img.width;
+                    inputCanvas.height = img.height;
+                    inputCtx.drawImage(img, 0, 0);
+                    
+                    try {
+                        originalImageData = inputCtx.getImageData(0, 0, inputCanvas.width, inputCanvas.height);
+                    } catch (e) {
+                        console.error("Error getting image data (possibly CORS issue with default image):", e);
+                        showMessage('Error processing image (CORS or other issue). Try uploading an image.', 'error');
+                        inputPlaceholder.textContent = 'Error loading image. Please upload one.';
+                        inputPlaceholder.style.display = 'block';
+                        originalImageData = null; // Ensure it's null if there's an error
+                        return; // Stop further processing
+                    }
+                    
+                    inputCanvas.style.width = (img.width * scale) + 'px';
+                    inputCanvas.style.height = (img.height * scale) + 'px';
+
+                    inputPlaceholder.style.display = 'none';
+                    outputPlaceholder.style.display = 'block';
+                    outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+                    outputCanvas.width = 0; outputCanvas.height = 0;
+                    
+                    if (isDefault) {
+                        showMessage('Default image loaded. Kernel changes will apply live.', 'info');
+                    } else {
+                        showMessage('Image loaded. Kernel changes will apply live.', 'info');
+                    }
+                    debouncedApplyConvolution();
+                };
+                img.onerror = () => {
+                    const errorMsg = isDefault ? 'Error loading default image. Try uploading an image.' : 'Error loading image file.';
+                    showMessage(errorMsg, 'error');
+                    originalImageData = null;
+                    inputPlaceholder.textContent = errorMsg;
+                    inputPlaceholder.style.display = 'block';
+                };
+                img.src = src;
+            }
+
+
+            // --- Image Handling ---
+            imageLoader.addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => loadAndProcessImage(e.target.result, false);
+                    reader.readAsDataURL(file);
+                }
+            });
+
+            // --- Kernel Grid Generation & Visuals ---
+            kernelRowsInput.addEventListener('input', () => {
+                generateKernelInputs();
+                debouncedApplyConvolution();
+            });
+            kernelColsInput.addEventListener('input', () => {
+                generateKernelInputs();
+                debouncedApplyConvolution();
+            });
+            applyReluCheckbox.addEventListener('change', debouncedApplyConvolution);
+            
+            function getWeightColor(value) {
+                const maxWeightMagnitude = 2.0; 
+                let h, s, l;
+                const displayValue = Math.max(-maxWeightMagnitude, Math.min(maxWeightMagnitude, value));
+
+                if (value === 0 || isNaN(value)) {
+                    return `hsl(0, 0%, 85%)`; 
+                } else if (value > 0) { 
+                    h = 0;   
+                    s = 80;  
+                    const intensity = Math.min(1, displayValue / maxWeightMagnitude); 
+                    l = 75 - (intensity * 25); 
+                } else { 
+                    h = 220; 
+                    s = 80;  
+                    const intensity = Math.min(1, Math.abs(displayValue) / maxWeightMagnitude);
+                    l = 75 - (intensity * 25); 
+                }
+                return `hsl(${h}, ${s}%, ${l}%)`;
+            }
+
+            function updateKernelSquareVisual(inputElement) {
+                const value = parseFloat(inputElement.value);
+                const square = inputElement.parentElement; 
+                if (square && square.classList.contains('kernel-weight-square')) {
+                    square.style.backgroundColor = getWeightColor(value);
+                }
+            }
+            
+            function updateAllKernelVisuals() {
+                const inputs = kernelGrid.querySelectorAll('.kernel-input');
+                inputs.forEach(input => updateKernelSquareVisual(input));
+            }
+
+            function generateKernelInputs() {
+                let rows = parseInt(kernelRowsInput.value);
+                let cols = parseInt(kernelColsInput.value);
+
+                if (rows % 2 === 0) rows = Math.max(1, rows -1);
+                if (cols % 2 === 0) cols = Math.max(1, cols-1);
+                kernelRowsInput.value = rows;
+                kernelColsInput.value = cols;
+
+                kernelGrid.innerHTML = ''; 
+                kernelGrid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+                kernelGrid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+
+                for (let i = 0; i < rows; i++) {
+                    for (let j = 0; j < cols; j++) {
+                        const square = document.createElement('div');
+                        square.className = 'kernel-weight-square';
+                        
+                        const input = document.createElement('input');
+                        input.type = 'number';
+                        input.step = '0.1'; 
+                        input.className = 'kernel-input';
+                        input.id = `kernel_${i}_${j}`;
+                        
+                        if (rows === cols && i === Math.floor(rows / 2) && j === Math.floor(cols / 2)) {
+                            input.value = '1';
+                        } else {
+                            input.value = '0';
+                        }
+                        
+                        input.addEventListener('input', () => {
+                            updateKernelSquareVisual(input);
+                            debouncedApplyConvolution();
+                        });
+                        
+                        square.appendChild(input); 
+                        kernelGrid.appendChild(square);
+                    }
+                }
+                updateAllKernelVisuals(); 
+            }
+
+            // --- Kernel Utility Functions ---
+            function getKernelFromInputs() {
+                const rows = parseInt(kernelRowsInput.value);
+                const cols = parseInt(kernelColsInput.value);
+                const kernel = [];
+                for (let i = 0; i < rows; i++) {
+                    const row = [];
+                    for (let j = 0; j < cols; j++) {
+                        const input = document.getElementById(`kernel_${i}_${j}`);
+                        row.push(parseFloat(input.value) || 0);
+                    }
+                    kernel.push(row);
+                }
+                return kernel;
+            }
+
+            resetKernelButton.addEventListener('click', () => {
+                const rows = parseInt(kernelRowsInput.value);
+                const cols = parseInt(kernelColsInput.value);
+                const midRow = Math.floor(rows / 2);
+                const midCol = Math.floor(cols / 2);
+
+                for (let i = 0; i < rows; i++) {
+                    for (let j = 0; j < cols; j++) {
+                        const input = document.getElementById(`kernel_${i}_${j}`);
+                        if (input) {
+                            input.value = (i === midRow && j === midCol && rows === cols) ? '1' : '0';
+                        }
+                    }
+                }
+                updateAllKernelVisuals();
+                showMessage('Kernel reset. Applying live...', 'info');
+                debouncedApplyConvolution();
+            });
+            
+            // Blur kernel button and function removed
+
+            // --- Convolution Logic ---
+            function debouncedApplyConvolution() {
+                clearTimeout(debounceTimeout);
+                if (originalImageData) { 
+                    showMessage('Updating convolution...', 'info');
+                    debounceTimeout = setTimeout(applyConvolution, DEBOUNCE_DELAY);
+                } else if (!defaultImageUrl) { // Only show this if there's no default image to even attempt loading
+                    showMessage('Upload an image to see convolution.', 'info');
+                } else if (inputPlaceholder.style.display !== 'none' && !inputPlaceholder.textContent.startsWith("Error")) {
+                     // If placeholder is visible and not showing an error, it might still be loading the default.
+                     // This prevents multiple "Upload an image" messages if default is slow or fails.
+                }
+            }
+
+            function applyConvolution() {
+                if (!originalImageData) {
+                    // Check if we're still trying to load the default image
+                    if (inputPlaceholder.style.display !== 'none' && inputPlaceholder.textContent.includes("Loading")) {
+                        showMessage('Waiting for default image to load...', 'info');
+                    } else {
+                        showMessage('Please upload or wait for an image to load.', 'error');
+                    }
+                    return;
+                }
+
+                const kernel = getKernelFromInputs();
+                if (!kernel || kernel.length === 0 || kernel[0].length === 0) {
+                    showMessage('Invalid kernel configuration.', 'error');
+                    return;
+                }
+                
+                const srcData = originalImageData.data;
+                const width = originalImageData.width;
+                const height = originalImageData.height;
+                
+                const outputPixelData = new Uint8ClampedArray(srcData.length);
+
+                const kernelHeight = kernel.length;
+                const kernelWidth = kernel[0].length;
+                const kernelCenterX = Math.floor(kernelWidth / 2);
+                const kernelCenterY = Math.floor(kernelHeight / 2);
+                const applyReLU = applyReluCheckbox.checked;
+
+                /*//dev/ scale srcData between -1 and 1
+                for (let i = 0; i < srcData.length; i += 4) {
+                    srcData[i] = (srcData[i] / 255) * 2 - 1; // Red
+                    srcData[i + 1] = (srcData[i + 1] / 255) * 2 - 1; // Green
+                    srcData[i + 2] = (srcData[i + 2] / 255) * 2 - 1; // Blue
+                }*/
+
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        let rSum = 0, gSum = 0, bSum = 0;
+
+                        for (let ky = 0; ky < kernelHeight; ky++) {
+                            for (let kx = 0; kx < kernelWidth; kx++) {
+                                const pixelY = y + (ky - kernelCenterY);
+                                const pixelX = x + (kx - kernelCenterX);
+
+                                if (pixelX >= 0 && pixelX < width && pixelY >= 0 && pixelY < height) {
+                                    const kernelVal = kernel[ky][kx];
+                                    const offset = (pixelY * width + pixelX) * 4;
+                                    rSum += srcData[offset] * kernelVal;
+                                    gSum += srcData[offset + 1] * kernelVal;
+                                    bSum += srcData[offset + 2] * kernelVal;
+                                }
+                            }
+                        }
+                        
+                        if (applyReLU) {
+                            rSum = Math.max(0, rSum);
+                            gSum = Math.max(0, gSum);
+                            bSum = Math.max(0, bSum);
+                        }
+
+                        const outputOffset = (y * width + x) * 4;
+                        outputPixelData[outputOffset] = rSum;
+                        outputPixelData[outputOffset + 1] = gSum;
+                        outputPixelData[outputOffset + 2] = bSum;
+                        outputPixelData[outputOffset + 3] = srcData[outputOffset + 3]; // Preserve alpha
+                    }
+                }
+                
+                const convolvedImageData = new ImageData(outputPixelData, width, height);
+                // rescale back to 0-255
+                /*for (let i = 0; i < convolvedImageData.data.length; i += 4) {
+                    convolvedImageData.data[i] = Math.min(255, Math.max(0, (convolvedImageData.data[i] + 1) * 127.5)); // Red
+                    convolvedImageData.data[i + 1] = Math.min(255, Math.max(0, (convolvedImageData.data[i + 1] + 1) * 127.5)); // Green
+                    convolvedImageData.data[i + 2] = Math.min(255, Math.max(0, (convolvedImageData.data[i + 2] + 1) * 127.5)); // Blue
+                }*/
+                
+                const MAX_DISPLAY_WIDTH_OUT = outputCanvas.parentElement.clientWidth > 0 ? outputCanvas.parentElement.clientWidth -4 : 400;
+                const scale_out = Math.min(1, MAX_DISPLAY_WIDTH_OUT / width);
+                outputCanvas.width = width;
+                outputCanvas.height = height;
+                outputCtx.putImageData(convolvedImageData, 0, 0);
+                outputCanvas.style.width = (width * scale_out) + 'px';
+                outputCanvas.style.height = (height * scale_out) + 'px';
+
+                outputPlaceholder.style.display = 'none';
+                showMessage('Convolution updated!', 'success');
+            }
+
+            // --- Utility Functions ---
+            function showMessage(text, type = 'info') {
+                messageArea.textContent = text;
+                if (type === 'error') {
+                    messageArea.className = 'mt-3 text-sm text-red-600 min-h-[1.25em]';
+                } else if (type === 'success') {
+                    messageArea.className = 'mt-3 text-sm text-green-600 min-h-[1.25em]';
+                } else { // 'info'
+                    messageArea.className = 'mt-3 text-sm text-blue-600 min-h-[1.25em]';
+                }
+            }
+
+            // Initial setup
+            generateKernelInputs(); 
+            if (defaultImageUrl) {
+                loadAndProcessImage(defaultImageUrl, true);
+            } else {
+                 showMessage('Upload an image and configure the kernel to begin.', 'info');
+                 inputPlaceholder.textContent = 'Upload an image to see it here';
+                 inputPlaceholder.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
