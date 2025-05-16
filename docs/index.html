@@ -23,40 +23,45 @@
         .canvas-placeholder {
             color: #6b7280; /* Tailwind gray-500 */
             font-style: italic;
+            text-align: center;
+            padding: 1rem;
         }
         canvas {
             max-width: 100%;
             height: auto;
             display: block; 
             border-radius: 0.375rem; /* rounded-md */
+            image-rendering: pixelated; /* Better for seeing raw array data */
+            /* image-rendering: -moz-crisp-edges; /* Firefox */
+            /* image-rendering: crisp-edges; /* W3C draft */
         }
         
         .kernel-weight-square {
             width: 3.5rem; 
             height: 3.5rem;
             border: 1px solid #9ca3af; 
-            border-radius: 0.375rem; 
+            border-radius: 0.375rem;
             display: flex;
             align-items: center;
             justify-content: center;
-            position: relative; 
+            position: relative;
             transition: background-color 0.2s ease-in-out;
         }
         .kernel-input {
             width: 100%;
             height: 100%;
             text-align: center;
-            font-size: 0.875rem; 
-            font-weight: 500; 
-            color: white; 
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: white;
             background-color: transparent;
             border: none;
             outline: none;
-            -moz-appearance: textfield; 
+            -moz-appearance: textfield;
         }
         .kernel-input::-webkit-outer-spin-button,
         .kernel-input::-webkit-inner-spin-button {
-            -webkit-appearance: none; 
+            -webkit-appearance: none;
             margin: 0;
         }
 
@@ -64,11 +69,11 @@
             transition: background-color 0.3s ease;
         }
         .btn-secondary {
-            background-color: #6b7280; 
+            background-color: #6b7280;
             color: white;
         }
         .btn-secondary:hover {
-            background-color: #4b5563; 
+            background-color: #4b5563;
         }
         .kernel-grid-container::-webkit-scrollbar {
             width: 8px;
@@ -91,8 +96,14 @@
             cursor: pointer;
         }
         .checkbox-label input[type="checkbox"] {
-            margin-right: 0.5rem; /* space between checkbox and text */
-            accent-color: #3b82f6; /* Tailwind blue-500 */
+            margin-right: 0.5rem;
+            accent-color: #3b82f6;
+        }
+        .file-input-label { /* Reused for the single button section title */
+            font-size: 0.875rem;
+            color: #374151;
+            margin-bottom: 0.25rem;
+            display: block;
         }
     </style>
 </head>
@@ -107,15 +118,19 @@
 
             <div class="space-y-6">
                 <section>
-                    <h2 class="text-xl font-semibold text-gray-700 mb-3">1. Input Image</h2>
-                    <p class="text-sm text-gray-500 mb-2">A default image is loaded. You can upload your own:</p>
-                    <input type="file" id="imageLoader" accept="image/*" class="block w-full text-sm text-gray-500
-                        file:mr-4 file:py-2 file:px-4
-                        file:rounded-md file:border-0
-                        file:text-sm file:font-semibold
-                        file:bg-blue-50 file:text-blue-700
-                        hover:file:bg-blue-100 cursor-pointer
-                    ">
+                    <h2 class="text-xl font-semibold text-gray-700 mb-3">1. Input Data</h2>
+                    <div class="mb-4">
+                        <label for="fileLoader" class="file-input-label">Upload Image or Array JSON file:</label>
+                        <input type="file" id="fileLoader" accept="image/*,.json,application/json" class="block w-full text-sm text-gray-500
+                            file:mr-4 file:py-2 file:px-4
+                            file:rounded-md file:border-0
+                            file:text-sm file:font-semibold
+                            file:bg-sky-50 file:text-sky-700  hover:file:bg-sky-100
+                            cursor-pointer
+                        ">
+                         <p class="text-xs text-gray-500 mt-1">Accepts images or JSON arrays (2D for grayscale, 3D HxWx3 for RGB). Array values are used directly for convolution; display is normalized.</p>
+                    </div>
+
                     <div id="inputCanvasContainer" class="mt-4 canvas-container rounded-md">
                         <canvas id="inputCanvas"></canvas>
                         <span id="inputPlaceholder" class="canvas-placeholder">Loading default image...</span>
@@ -143,7 +158,7 @@
                     </div>
                     <div class="flex items-center space-x-2">
                         <button id="resetKernelButton" class="btn btn-secondary py-2 px-4 rounded-md text-sm font-medium">Reset Kernel (Identity)</button>
-                        </div>
+                    </div>
                 </section>
 
                 <section>
@@ -175,7 +190,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // Canvas elements and contexts
+            // DOM Element References
             const inputCanvas = document.getElementById('inputCanvas');
             const inputCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
             const outputCanvas = document.getElementById('outputCanvas');
@@ -183,334 +198,395 @@
             const inputPlaceholder = document.getElementById('inputPlaceholder');
             const outputPlaceholder = document.getElementById('outputPlaceholder');
 
-            // Input elements
-            const imageLoader = document.getElementById('imageLoader');
+            const fileLoader = document.getElementById('fileLoader'); // Single file loader
             const kernelRowsInput = document.getElementById('kernelRows');
             const kernelColsInput = document.getElementById('kernelCols');
             const kernelGrid = document.getElementById('kernelGrid');
             const resetKernelButton = document.getElementById('resetKernelButton');
-            // const blurKernelButton = document.getElementById('blurKernelButton'); // Removed
             const applyReluCheckbox = document.getElementById('applyReluCheckbox');
             const messageArea = document.getElementById('messageArea');
+            
+            // Global state for the current input data
+            let currentInput = {
+                type: null, // 'image' or 'array'
+                width: 0,
+                height: 0,
+                isGrayscaleArray: false,
+                dataForConvolution: null, // For 'image': ImageData; For 'array': raw parsed numeric array
+                imageDataForInputCanvasDisplay: null, // Scaled ImageData for input canvas display
+            };
 
-            let originalImageData = null;
             let debounceTimeout = null;
             const DEBOUNCE_DELAY = 500; 
-
-            // --- Default Image ---
-            // REPLACE THIS URL with the path to your local default image if needed
-            // e.g., const defaultImageUrl = "./images/my-default-image.jpg";
             const defaultImageUrl = "https://placehold.co/400x300/aabbcc/ffffff?text=Default+Image";
 
-            function loadAndProcessImage(src, isDefault = false) {
+            // --- Helper Functions ---
+            function displayImageDataOnCanvas(imageDataObj, canvasEl, canvasCtx, placeholderEl) {
+                if (!imageDataObj || !canvasEl || !canvasCtx) {
+                    console.error("displayImageDataOnCanvas: Missing imageDataObj, canvasEl, or canvasCtx");
+                    if (placeholderEl) {
+                        placeholderEl.textContent = "Error displaying image.";
+                        placeholderEl.style.display = 'block';
+                    }
+                    return;
+                }
+                const MAX_DISPLAY_WIDTH = canvasEl.parentElement.clientWidth > 0 ? canvasEl.parentElement.clientWidth - 4 : 400;
+                let scale = 1;
+                if (imageDataObj.width > 0) {
+                     scale = Math.min(1, MAX_DISPLAY_WIDTH / imageDataObj.width);
+                }
+                
+                canvasEl.width = imageDataObj.width;
+                canvasEl.height = imageDataObj.height;
+                canvasCtx.putImageData(imageDataObj, 0, 0);
+                
+                canvasEl.style.width = (imageDataObj.width * scale) + 'px';
+                canvasEl.style.height = (imageDataObj.height * scale) + 'px';
+
+                if (placeholderEl) placeholderEl.style.display = 'none';
+            }
+
+            function showMessage(txt,type='info'){
+                messageArea.textContent=txt;
+                if(type==='error')messageArea.className='mt-3 text-sm text-red-600 min-h-[1.25em]';
+                else if(type==='success')messageArea.className='mt-3 text-sm text-green-600 min-h-[1.25em]';
+                else messageArea.className='mt-3 text-sm text-blue-600 min-h-[1.25em]';
+            }
+
+            // --- Image and Array Loading ---
+            function loadAndProcessImageSrc(src, isDefault = false) {
                 const img = new Image();
-                // If it's a local file or data URL, it might not need crossOrigin.
-                // For external URLs like placehold.co, it's often necessary for canvas operations.
-                if (src.startsWith("http")) { // A simple check for external URLs
+                if (src.startsWith("http")) { // Handle potential CORS for external default image
                     img.crossOrigin = "Anonymous"; 
                 }
 
                 img.onload = () => {
-                    const MAX_DISPLAY_WIDTH = inputCanvas.parentElement.clientWidth > 0 ? inputCanvas.parentElement.clientWidth - 4 : 400;
-                    const scale = Math.min(1, MAX_DISPLAY_WIDTH / img.width);
-                    inputCanvas.width = img.width;
-                    inputCanvas.height = img.height;
-                    inputCtx.drawImage(img, 0, 0);
+                    currentInput.type = 'image';
+                    currentInput.width = img.width;
+                    currentInput.height = img.height;
+                    currentInput.isGrayscaleArray = false;
+
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = img.width;
+                    tempCanvas.height = img.height;
+                    const tempCtx = tempCanvas.getContext('2d', {willReadFrequently: true});
+                    tempCtx.drawImage(img, 0, 0);
                     
                     try {
-                        originalImageData = inputCtx.getImageData(0, 0, inputCanvas.width, inputCanvas.height);
+                        const imgData = tempCtx.getImageData(0, 0, img.width, img.height);
+                        currentInput.dataForConvolution = imgData; 
+                        currentInput.imageDataForInputCanvasDisplay = imgData; // For images, display and convolution data are the same
+                        
+                        displayImageDataOnCanvas(currentInput.imageDataForInputCanvasDisplay, inputCanvas, inputCtx, inputPlaceholder);
+                        showMessage(isDefault ? 'Default image loaded.' : 'Image loaded.', 'info');
                     } catch (e) {
-                        console.error("Error getting image data (possibly CORS issue with default image):", e);
-                        showMessage('Error processing image (CORS or other issue). Try uploading an image.', 'error');
-                        inputPlaceholder.textContent = 'Error loading image. Please upload one.';
+                        console.error("Error getting image data:", e);
+                        showMessage('Error processing image. Try again.', 'error');
+                        inputPlaceholder.textContent = 'Error loading image.';
                         inputPlaceholder.style.display = 'block';
-                        originalImageData = null; // Ensure it's null if there's an error
-                        return; // Stop further processing
+                        currentInput.type = null; 
+                        return;
                     }
                     
-                    inputCanvas.style.width = (img.width * scale) + 'px';
-                    inputCanvas.style.height = (img.height * scale) + 'px';
-
-                    inputPlaceholder.style.display = 'none';
-                    outputPlaceholder.style.display = 'block';
-                    outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+                    outputPlaceholder.style.display = 'block'; 
+                    outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height); // Clear previous output
                     outputCanvas.width = 0; outputCanvas.height = 0;
-                    
-                    if (isDefault) {
-                        showMessage('Default image loaded. Kernel changes will apply live.', 'info');
-                    } else {
-                        showMessage('Image loaded. Kernel changes will apply live.', 'info');
-                    }
                     debouncedApplyConvolution();
                 };
                 img.onerror = () => {
-                    const errorMsg = isDefault ? 'Error loading default image. Try uploading an image.' : 'Error loading image file.';
-                    showMessage(errorMsg, 'error');
-                    originalImageData = null;
-                    inputPlaceholder.textContent = errorMsg;
+                    showMessage(isDefault ? 'Error loading default image.' : 'Error loading image file.', 'error');
+                    currentInput.type = null;
+                    inputPlaceholder.textContent = 'Error loading input.';
                     inputPlaceholder.style.display = 'block';
                 };
                 img.src = src;
             }
 
+            function loadAndProcessArrayFile(file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const rawArray = JSON.parse(e.target.result);
+                        if (!Array.isArray(rawArray) || rawArray.length === 0) throw new Error("Invalid JSON: Not an array or empty.");
 
-            // --- Image Handling ---
-            imageLoader.addEventListener('change', (event) => {
+                        let height = rawArray.length;
+                        let width = 0;
+                        let isGrayscale = false;
+
+                        if (Array.isArray(rawArray[0])) {
+                            width = rawArray[0].length;
+                            if (width === 0) throw new Error("Invalid array: Inner array (width) is empty.");
+                            if (Array.isArray(rawArray[0][0])) { 
+                                if (rawArray[0][0].length !== 3) throw new Error("Invalid RGB: Innermost array must have 3 values.");
+                                isGrayscale = false;
+                            } else if (typeof rawArray[0][0] === 'number') { 
+                                isGrayscale = true;
+                            } else throw new Error("Invalid array: Elements must be numbers or [R,G,B] arrays.");
+                        } else throw new Error("Invalid JSON: Must be 2D or 3D array.");
+                        if (height === 0) throw new Error("Invalid array: Outer array (height) is empty.");
+
+                        currentInput.type = 'array';
+                        currentInput.width = width;
+                        currentInput.height = height;
+                        currentInput.isGrayscaleArray = isGrayscale;
+                        currentInput.dataForConvolution = rawArray;
+
+                        let minVal = Infinity, maxVal = -Infinity;
+                        for (let r = 0; r < height; r++) for (let c = 0; c < width; c++) {
+                            if (isGrayscale) {
+                                const val = rawArray[r][c];
+                                if (typeof val !== 'number') throw new Error("Grayscale array has non-numeric values.");
+                                minVal = Math.min(minVal, val); maxVal = Math.max(maxVal, val);
+                            } else {
+                                for (let ch = 0; ch < 3; ch++) {
+                                    const val = rawArray[r][c][ch];
+                                    if (typeof val !== 'number') throw new Error("RGB array has non-numeric values.");
+                                    minVal = Math.min(minVal, val); maxVal = Math.max(maxVal, val);
+                                }
+                            }
+                        }
+                        if (minVal === Infinity) throw new Error("Array has no numeric data.");
+
+                        const displayImageData = inputCtx.createImageData(width, height);
+                        const data = displayImageData.data;
+                        for (let r = 0; r < height; r++) for (let c = 0; c < width; c++) {
+                            const idx = (r * width + c) * 4;
+                            if (isGrayscale) {
+                                let val = rawArray[r][c];
+                                val = (maxVal === minVal) ? 0 : ((val - minVal) / (maxVal - minVal)) * 255;
+                                data[idx] = data[idx+1] = data[idx+2] = val;
+                            } else {
+                                for (let ch = 0; ch < 3; ch++) {
+                                    let val = rawArray[r][c][ch];
+                                    val = (maxVal === minVal) ? 0 : ((val - minVal) / (maxVal - minVal)) * 255;
+                                    data[idx + ch] = val;
+                                }
+                            }
+                            data[idx + 3] = 255; // Alpha for display
+                        }
+                        currentInput.imageDataForInputCanvasDisplay = displayImageData;
+                        displayImageDataOnCanvas(currentInput.imageDataForInputCanvasDisplay, inputCanvas, inputCtx, inputPlaceholder);
+                        showMessage('Array (JSON) loaded. Raw values for convolution, normalized for display.', 'info');
+                        
+                        outputPlaceholder.style.display = 'block';
+                        outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+                        outputCanvas.width = 0; outputCanvas.height = 0;
+                        debouncedApplyConvolution();
+
+                    } catch (err) {
+                        console.error("Error processing array file:", err);
+                        showMessage(`Error: ${err.message}`, 'error');
+                        currentInput.type = null;
+                        inputPlaceholder.textContent = 'Error loading array. Check format.';
+                        inputPlaceholder.style.display = 'block';
+                    }
+                };
+                reader.onerror = () => {
+                     showMessage('Error reading array file.', 'error');
+                     currentInput.type = null;
+                };
+                reader.readAsText(file);
+            }
+            
+            // Single file input handler
+            fileLoader.addEventListener('change', (event) => {
                 const file = event.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => loadAndProcessImage(e.target.result, false);
-                    reader.readAsDataURL(file);
+                if (!file) return;
+
+                if (file.type.startsWith('image/')) {
+                    loadAndProcessImageSrc(URL.createObjectURL(file), false);
+                } else if (file.type === 'application/json' || file.name.toLowerCase().endsWith('.json')) {
+                    loadAndProcessArrayFile(file);
+                } else {
+                    showMessage('Unsupported file type. Please upload an image or a JSON array file.', 'error');
                 }
             });
 
-            // --- Kernel Grid Generation & Visuals ---
-            kernelRowsInput.addEventListener('input', () => {
-                generateKernelInputs();
-                debouncedApplyConvolution();
-            });
-            kernelColsInput.addEventListener('input', () => {
-                generateKernelInputs();
-                debouncedApplyConvolution();
-            });
+            // --- Kernel UI and Logic ---
+            kernelRowsInput.addEventListener('input', () => { generateKernelInputs(); debouncedApplyConvolution(); });
+            kernelColsInput.addEventListener('input', () => { generateKernelInputs(); debouncedApplyConvolution(); });
             applyReluCheckbox.addEventListener('change', debouncedApplyConvolution);
             
             function getWeightColor(value) {
                 const maxWeightMagnitude = 2.0; 
                 let h, s, l;
                 const displayValue = Math.max(-maxWeightMagnitude, Math.min(maxWeightMagnitude, value));
-
-                if (value === 0 || isNaN(value)) {
-                    return `hsl(0, 0%, 85%)`; 
-                } else if (value > 0) { 
-                    h = 0;   
-                    s = 80;  
-                    const intensity = Math.min(1, displayValue / maxWeightMagnitude); 
-                    l = 75 - (intensity * 25); 
-                } else { 
-                    h = 220; 
-                    s = 80;  
-                    const intensity = Math.min(1, Math.abs(displayValue) / maxWeightMagnitude);
-                    l = 75 - (intensity * 25); 
-                }
+                if (value === 0 || isNaN(value)) return `hsl(0, 0%, 85%)`; 
+                else if (value > 0) { h = 0; s = 80; const i = Math.min(1, displayValue/maxWeightMagnitude); l = 75-(i*25); } 
+                else { h = 220; s = 80; const i = Math.min(1, Math.abs(displayValue)/maxWeightMagnitude); l = 75-(i*25); }
                 return `hsl(${h}, ${s}%, ${l}%)`;
             }
 
-            function updateKernelSquareVisual(inputElement) {
-                const value = parseFloat(inputElement.value);
-                const square = inputElement.parentElement; 
-                if (square && square.classList.contains('kernel-weight-square')) {
-                    square.style.backgroundColor = getWeightColor(value);
-                }
+            function updateKernelSquareVisual(inputEl) {
+                const val = parseFloat(inputEl.value);
+                const sq = inputEl.parentElement; 
+                if (sq && sq.classList.contains('kernel-weight-square')) sq.style.backgroundColor = getWeightColor(val);
             }
             
             function updateAllKernelVisuals() {
-                const inputs = kernelGrid.querySelectorAll('.kernel-input');
-                inputs.forEach(input => updateKernelSquareVisual(input));
+                kernelGrid.querySelectorAll('.kernel-input').forEach(updateKernelSquareVisual);
             }
 
             function generateKernelInputs() {
-                let rows = parseInt(kernelRowsInput.value);
-                let cols = parseInt(kernelColsInput.value);
-
-                if (rows % 2 === 0) rows = Math.max(1, rows -1);
-                if (cols % 2 === 0) cols = Math.max(1, cols-1);
-                kernelRowsInput.value = rows;
-                kernelColsInput.value = cols;
-
-                kernelGrid.innerHTML = ''; 
-                kernelGrid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
-                kernelGrid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-
-                for (let i = 0; i < rows; i++) {
-                    for (let j = 0; j < cols; j++) {
-                        const square = document.createElement('div');
-                        square.className = 'kernel-weight-square';
-                        
-                        const input = document.createElement('input');
-                        input.type = 'number';
-                        input.step = '0.1'; 
-                        input.className = 'kernel-input';
-                        input.id = `kernel_${i}_${j}`;
-                        
-                        if (rows === cols && i === Math.floor(rows / 2) && j === Math.floor(cols / 2)) {
-                            input.value = '1';
-                        } else {
-                            input.value = '0';
-                        }
-                        
-                        input.addEventListener('input', () => {
-                            updateKernelSquareVisual(input);
-                            debouncedApplyConvolution();
-                        });
-                        
-                        square.appendChild(input); 
-                        kernelGrid.appendChild(square);
-                    }
+                let r = parseInt(kernelRowsInput.value), c = parseInt(kernelColsInput.value);
+                if (r%2===0) r=Math.max(1,r-1); if (c%2===0) c=Math.max(1,c-1);
+                kernelRowsInput.value=r; kernelColsInput.value=c;
+                kernelGrid.innerHTML=''; 
+                kernelGrid.style.gridTemplateRows=`repeat(${r},minmax(0,1fr))`;
+                kernelGrid.style.gridTemplateColumns=`repeat(${c},minmax(0,1fr))`;
+                for (let i=0;i<r;i++) for (let j=0;j<c;j++) {
+                    const sq=document.createElement('div'); sq.className='kernel-weight-square';
+                    const inp=document.createElement('input'); inp.type='number'; inp.step='0.1'; 
+                    inp.className='kernel-input'; inp.id=`kernel_${i}_${j}`;
+                    inp.value=(r===c && i===Math.floor(r/2) && j===Math.floor(c/2))?'1':'0';
+                    inp.addEventListener('input',()=>{updateKernelSquareVisual(inp);debouncedApplyConvolution();});
+                    sq.appendChild(inp); kernelGrid.appendChild(sq);
                 }
                 updateAllKernelVisuals(); 
             }
 
-            // --- Kernel Utility Functions ---
             function getKernelFromInputs() {
-                const rows = parseInt(kernelRowsInput.value);
-                const cols = parseInt(kernelColsInput.value);
-                const kernel = [];
-                for (let i = 0; i < rows; i++) {
-                    const row = [];
-                    for (let j = 0; j < cols; j++) {
-                        const input = document.getElementById(`kernel_${i}_${j}`);
-                        row.push(parseFloat(input.value) || 0);
-                    }
-                    kernel.push(row);
-                }
-                return kernel;
+                const r=parseInt(kernelRowsInput.value), c=parseInt(kernelColsInput.value), k=[];
+                for(let i=0;i<r;i++){ const row=[]; for(let j=0;j<c;j++)row.push(parseFloat(document.getElementById(`kernel_${i}_${j}`).value)||0); k.push(row); }
+                return k;
             }
 
-            resetKernelButton.addEventListener('click', () => {
-                const rows = parseInt(kernelRowsInput.value);
-                const cols = parseInt(kernelColsInput.value);
-                const midRow = Math.floor(rows / 2);
-                const midCol = Math.floor(cols / 2);
-
-                for (let i = 0; i < rows; i++) {
-                    for (let j = 0; j < cols; j++) {
-                        const input = document.getElementById(`kernel_${i}_${j}`);
-                        if (input) {
-                            input.value = (i === midRow && j === midCol && rows === cols) ? '1' : '0';
-                        }
-                    }
-                }
-                updateAllKernelVisuals();
-                showMessage('Kernel reset. Applying live...', 'info');
-                debouncedApplyConvolution();
+            resetKernelButton.addEventListener('click',()=>{
+                const r=parseInt(kernelRowsInput.value),c=parseInt(kernelColsInput.value),mr=Math.floor(r/2),mc=Math.floor(c/2);
+                for(let i=0;i<r;i++)for(let j=0;j<c;j++){const inp=document.getElementById(`kernel_${i}_${j}`);if(inp)inp.value=(i===mr&&j===mc&&r===c)?'1':'0';}
+                updateAllKernelVisuals(); showMessage('Kernel reset. Applying live...','info'); debouncedApplyConvolution();
             });
             
-            // Blur kernel button and function removed
-
-            // --- Convolution Logic ---
+            // --- Convolution Core Logic ---
             function debouncedApplyConvolution() {
                 clearTimeout(debounceTimeout);
-                if (originalImageData) { 
-                    showMessage('Updating convolution...', 'info');
-                    debounceTimeout = setTimeout(applyConvolution, DEBOUNCE_DELAY);
-                } else if (!defaultImageUrl) { // Only show this if there's no default image to even attempt loading
-                    showMessage('Upload an image to see convolution.', 'info');
-                } else if (inputPlaceholder.style.display !== 'none' && !inputPlaceholder.textContent.startsWith("Error")) {
-                     // If placeholder is visible and not showing an error, it might still be loading the default.
-                     // This prevents multiple "Upload an image" messages if default is slow or fails.
+                if (currentInput.type) { 
+                    showMessage('Updating convolution...','info'); 
+                    debounceTimeout=setTimeout(applyConvolution,DEBOUNCE_DELAY); 
+                } else if (!defaultImageUrl) { 
+                    showMessage('Upload an image or array to see convolution.','info'); 
                 }
             }
 
             function applyConvolution() {
-                if (!originalImageData) {
-                    // Check if we're still trying to load the default image
-                    if (inputPlaceholder.style.display !== 'none' && inputPlaceholder.textContent.includes("Loading")) {
-                        showMessage('Waiting for default image to load...', 'info');
-                    } else {
-                        showMessage('Please upload or wait for an image to load.', 'error');
-                    }
+                if (!currentInput.type || !currentInput.dataForConvolution) {
+                    showMessage('Please upload input data (image or array JSON).','error');
                     return;
                 }
-
-                const kernel = getKernelFromInputs();
-                if (!kernel || kernel.length === 0 || kernel[0].length === 0) {
-                    showMessage('Invalid kernel configuration.', 'error');
-                    return;
-                }
+                const kernel=getKernelFromInputs();
+                if (!kernel||kernel.length===0||kernel[0].length===0){showMessage('Invalid kernel configuration.','error');return;}
                 
-                const srcData = originalImageData.data;
-                const width = originalImageData.width;
-                const height = originalImageData.height;
-                
-                const outputPixelData = new Uint8ClampedArray(srcData.length);
+                const {width, height, type, dataForConvolution, isGrayscaleArray, imageDataForInputCanvasDisplay} = currentInput;
+                const kH=kernel.length,kW=kernel[0].length,kCX=Math.floor(kW/2),kCY=Math.floor(kH/2);
+                const applyReLU=applyReluCheckbox.checked;
 
-                const kernelHeight = kernel.length;
-                const kernelWidth = kernel[0].length;
-                const kernelCenterX = Math.floor(kernelWidth / 2);
-                const kernelCenterY = Math.floor(kernelHeight / 2);
-                const applyReLU = applyReluCheckbox.checked;
+                let rawConvolvedValues = []; 
 
-                /*//dev/ scale srcData between -1 and 1
-                for (let i = 0; i < srcData.length; i += 4) {
-                    srcData[i] = (srcData[i] / 255) * 2 - 1; // Red
-                    srcData[i + 1] = (srcData[i + 1] / 255) * 2 - 1; // Green
-                    srcData[i + 2] = (srcData[i + 2] / 255) * 2 - 1; // Blue
-                }*/
-
-                for (let y = 0; y < height; y++) {
-                    for (let x = 0; x < width; x++) {
-                        let rSum = 0, gSum = 0, bSum = 0;
-
-                        for (let ky = 0; ky < kernelHeight; ky++) {
-                            for (let kx = 0; kx < kernelWidth; kx++) {
-                                const pixelY = y + (ky - kernelCenterY);
-                                const pixelX = x + (kx - kernelCenterX);
-
-                                if (pixelX >= 0 && pixelX < width && pixelY >= 0 && pixelY < height) {
-                                    const kernelVal = kernel[ky][kx];
-                                    const offset = (pixelY * width + pixelX) * 4;
-                                    rSum += srcData[offset] * kernelVal;
-                                    gSum += srcData[offset + 1] * kernelVal;
-                                    bSum += srcData[offset + 2] * kernelVal;
+                for (let y=0; y<height; y++) {
+                    let rowValues = [];
+                    for (let x=0; x<width; x++) {
+                        let rSum=0,gSum=0,bSum=0;
+                        for(let ky=0;ky<kH;ky++) for(let kx=0;kx<kW;kx++) {
+                            const pY=y+(ky-kCY),pX=x+(kx-kCX);
+                            if(pX>=0&&pX<width&&pY>=0&&pY<height){
+                                const kV=kernel[ky][kx];
+                                if (type === 'image') {
+                                    const offset=(pY*width+pX)*4;
+                                    rSum += dataForConvolution.data[offset] * kV;
+                                    gSum += dataForConvolution.data[offset+1] * kV;
+                                    bSum += dataForConvolution.data[offset+2] * kV;
+                                } else { // type === 'array'
+                                    if (isGrayscaleArray) {
+                                        const val = dataForConvolution[pY][pX]; // Raw numeric value
+                                        rSum += val * kV; gSum += val * kV; bSum += val * kV; // Apply to all channels for grayscale
+                                    } else { // RGB array
+                                        rSum += dataForConvolution[pY][pX][0] * kV; // Raw R
+                                        gSum += dataForConvolution[pY][pX][1] * kV; // Raw G
+                                        bSum += dataForConvolution[pY][pX][2] * kV; // Raw B
+                                    }
                                 }
                             }
                         }
+                        if(applyReLU){rSum=Math.max(0,rSum);gSum=Math.max(0,gSum);bSum=Math.max(0,bSum);}
                         
-                        if (applyReLU) {
-                            rSum = Math.max(0, rSum);
-                            gSum = Math.max(0, gSum);
-                            bSum = Math.max(0, bSum);
+                        if (type === 'array' && isGrayscaleArray) {
+                            rowValues.push(rSum); 
+                        } else {
+                            rowValues.push({r: rSum, g: gSum, b: bSum}); 
                         }
+                    }
+                    rawConvolvedValues.push(rowValues);
+                }
+                
+                const finalOutputImageData = outputCtx.createImageData(width, height);
+                const outData = finalOutputImageData.data;
+                let outputAlpha = 255; // Default alpha
 
-                        const outputOffset = (y * width + x) * 4;
-                        outputPixelData[outputOffset] = rSum;
-                        outputPixelData[outputOffset + 1] = gSum;
-                        outputPixelData[outputOffset + 2] = bSum;
-                        outputPixelData[outputOffset + 3] = srcData[outputOffset + 3]; // Preserve alpha
+                if (type === 'array') {
+                    // Ensure imageDataForInputCanvasDisplay and its data property are valid before accessing alpha
+                    if (imageDataForInputCanvasDisplay && imageDataForInputCanvasDisplay.data && imageDataForInputCanvasDisplay.data.length > 3) {
+                         // For arrays, the input display alpha is always 255, but we fetch it to be consistent.
+                         // Use alpha from the first pixel of the display version as a representative.
+                        outputAlpha = imageDataForInputCanvasDisplay.data[3]; 
+                    } else {
+                        console.warn("imageDataForInputCanvasDisplay.data not available for alpha, defaulting to 255");
+                    }
+
+                    let minROut=Infinity, maxROut=-Infinity, minGOut=Infinity, maxGOut=-Infinity, minBOut=Infinity, maxBOut=-Infinity;
+                    for (let y=0; y<height; y++) for (let x=0; x<width; x++) {
+                        if (isGrayscaleArray) {
+                            const val = rawConvolvedValues[y][x];
+                            minROut = Math.min(minROut, val); maxROut = Math.max(maxROut, val);
+                        } else {
+                            const {r,g,b} = rawConvolvedValues[y][x];
+                            minROut = Math.min(minROut, r); maxROut = Math.max(maxROut, r);
+                            minGOut = Math.min(minGOut, g); maxGOut = Math.max(maxGOut, g);
+                            minBOut = Math.min(minBOut, b); maxBOut = Math.max(maxBOut, b);
+                        }
+                    }
+                    if (minROut === Infinity) { minROut = maxROut = minGOut = maxGOut = minBOut = maxBOut = 0;}
+
+                    for (let y=0; y<height; y++) for (let x=0; x<width; x++) {
+                        const idx = (y*width+x)*4;
+                        if (isGrayscaleArray) {
+                            let val = rawConvolvedValues[y][x];
+                            val = (maxROut === minROut) ? 0 : ((val - minROut) / (maxROut - minROut)) * 255;
+                            outData[idx]=outData[idx+1]=outData[idx+2]=val;
+                        } else {
+                            const {r,g,b} = rawConvolvedValues[y][x];
+                            outData[idx]   = (maxROut === minROut) ? 0 : ((r - minROut) / (maxROut - minROut)) * 255;
+                            outData[idx+1] = (maxGOut === minGOut) ? 0 : ((g - minGOut) / (maxGOut - minGOut)) * 255;
+                            outData[idx+2] = (maxBOut === minBOut) ? 0 : ((b - minBOut) / (maxBOut - minBOut)) * 255;
+                        }
+                        outData[idx+3] = outputAlpha; 
+                    }
+                } else { // type === 'image'
+                    for (let y=0; y<height; y++) for (let x=0; x<width; x++) {
+                        const idx = (y*width+x)*4;
+                        const {r,g,b} = rawConvolvedValues[y][x];
+                        outData[idx]   = r; // Already in 0-255 range effectively, will be clamped by Uint8ClampedArray
+                        outData[idx+1] = g;
+                        outData[idx+2] = b;
+                        // For images, use the original alpha from the input image's ImageData
+                        if (dataForConvolution && dataForConvolution.data && dataForConvolution.data.length > idx + 3) {
+                           outData[idx+3] = dataForConvolution.data[idx+3]; 
+                        } else {
+                           outData[idx+3] = 255; // Fallback alpha
+                        }
                     }
                 }
-                
-                const convolvedImageData = new ImageData(outputPixelData, width, height);
-                // rescale back to 0-255
-                /*for (let i = 0; i < convolvedImageData.data.length; i += 4) {
-                    convolvedImageData.data[i] = Math.min(255, Math.max(0, (convolvedImageData.data[i] + 1) * 127.5)); // Red
-                    convolvedImageData.data[i + 1] = Math.min(255, Math.max(0, (convolvedImageData.data[i + 1] + 1) * 127.5)); // Green
-                    convolvedImageData.data[i + 2] = Math.min(255, Math.max(0, (convolvedImageData.data[i + 2] + 1) * 127.5)); // Blue
-                }*/
-                
-                const MAX_DISPLAY_WIDTH_OUT = outputCanvas.parentElement.clientWidth > 0 ? outputCanvas.parentElement.clientWidth -4 : 400;
-                const scale_out = Math.min(1, MAX_DISPLAY_WIDTH_OUT / width);
-                outputCanvas.width = width;
-                outputCanvas.height = height;
-                outputCtx.putImageData(convolvedImageData, 0, 0);
-                outputCanvas.style.width = (width * scale_out) + 'px';
-                outputCanvas.style.height = (height * scale_out) + 'px';
-
-                outputPlaceholder.style.display = 'none';
-                showMessage('Convolution updated!', 'success');
+                displayImageDataOnCanvas(finalOutputImageData, outputCanvas, outputCtx, outputPlaceholder);
+                showMessage('Convolution updated!','success');
             }
 
-            // --- Utility Functions ---
-            function showMessage(text, type = 'info') {
-                messageArea.textContent = text;
-                if (type === 'error') {
-                    messageArea.className = 'mt-3 text-sm text-red-600 min-h-[1.25em]';
-                } else if (type === 'success') {
-                    messageArea.className = 'mt-3 text-sm text-green-600 min-h-[1.25em]';
-                } else { // 'info'
-                    messageArea.className = 'mt-3 text-sm text-blue-600 min-h-[1.25em]';
-                }
-            }
-
-            // Initial setup
+            // --- Initial Setup ---
             generateKernelInputs(); 
             if (defaultImageUrl) {
-                loadAndProcessImage(defaultImageUrl, true);
-            } else {
-                 showMessage('Upload an image and configure the kernel to begin.', 'info');
-                 inputPlaceholder.textContent = 'Upload an image to see it here';
-                 inputPlaceholder.style.display = 'block';
+                loadAndProcessImageSrc(defaultImageUrl,true);
+            } else { 
+                showMessage('Upload an image or array (JSON) to begin.','info'); 
+                inputPlaceholder.textContent='Upload input data to see it here'; 
+                inputPlaceholder.style.display='block'; 
             }
         });
     </script>
