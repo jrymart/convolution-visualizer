@@ -31,16 +31,14 @@
             height: auto;
             display: block; 
             border-radius: 0.375rem; /* rounded-md */
-            image-rendering: pixelated; /* Better for seeing raw array data */
-            /* image-rendering: -moz-crisp-edges; /* Firefox */
-            /* image-rendering: crisp-edges; /* W3C draft */
+            image-rendering: pixelated; 
         }
         
         .kernel-weight-square {
             width: 3.5rem; 
             height: 3.5rem;
             border: 1px solid #9ca3af; 
-            border-radius: 0.375rem;
+            border-radius: 0.375rem; 
             display: flex;
             align-items: center;
             justify-content: center;
@@ -99,7 +97,7 @@
             margin-right: 0.5rem;
             accent-color: #3b82f6;
         }
-        .file-input-label { /* Reused for the single button section title */
+        .file-input-label {
             font-size: 0.875rem;
             color: #374151;
             margin-bottom: 0.25rem;
@@ -133,7 +131,7 @@
 
                     <div id="inputCanvasContainer" class="mt-4 canvas-container rounded-md">
                         <canvas id="inputCanvas"></canvas>
-                        <span id="inputPlaceholder" class="canvas-placeholder">Loading default image...</span>
+                        <span id="inputPlaceholder" class="canvas-placeholder">Loading default data...</span>
                     </div>
                 </section>
 
@@ -198,7 +196,7 @@
             const inputPlaceholder = document.getElementById('inputPlaceholder');
             const outputPlaceholder = document.getElementById('outputPlaceholder');
 
-            const fileLoader = document.getElementById('fileLoader'); // Single file loader
+            const fileLoader = document.getElementById('fileLoader'); 
             const kernelRowsInput = document.getElementById('kernelRows');
             const kernelColsInput = document.getElementById('kernelCols');
             const kernelGrid = document.getElementById('kernelGrid');
@@ -206,19 +204,22 @@
             const applyReluCheckbox = document.getElementById('applyReluCheckbox');
             const messageArea = document.getElementById('messageArea');
             
-            // Global state for the current input data
             let currentInput = {
-                type: null, // 'image' or 'array'
+                type: null, 
                 width: 0,
                 height: 0,
                 isGrayscaleArray: false,
-                dataForConvolution: null, // For 'image': ImageData; For 'array': raw parsed numeric array
-                imageDataForInputCanvasDisplay: null, // Scaled ImageData for input canvas display
+                dataForConvolution: null, 
+                imageDataForInputCanvasDisplay: null, 
             };
 
             let debounceTimeout = null;
             const DEBOUNCE_DELAY = 500; 
-            const defaultImageUrl = "https://placehold.co/400x300/aabbcc/ffffff?text=Default+Image";
+            // ** IMPORTANT: Replace this with the actual path to YOUR default JSON file on your server **
+            // For example: const defaultDataUrl = "./data/my-default-array.json";
+            // Or, to keep the placeholder image as a fallback:
+            // const defaultDataUrl = "https://placehold.co/400x300/aabbcc/ffffff?text=Default+Image"; 
+            const defaultDataUrl = "./high_peclet.json"; // Example: expecting default-array.json in the same directory
 
             // --- Helper Functions ---
             function displayImageDataOnCanvas(imageDataObj, canvasEl, canvasCtx, placeholderEl) {
@@ -256,7 +257,7 @@
             // --- Image and Array Loading ---
             function loadAndProcessImageSrc(src, isDefault = false) {
                 const img = new Image();
-                if (src.startsWith("http")) { // Handle potential CORS for external default image
+                if (src.startsWith("http")) { 
                     img.crossOrigin = "Anonymous"; 
                 }
 
@@ -275,7 +276,7 @@
                     try {
                         const imgData = tempCtx.getImageData(0, 0, img.width, img.height);
                         currentInput.dataForConvolution = imgData; 
-                        currentInput.imageDataForInputCanvasDisplay = imgData; // For images, display and convolution data are the same
+                        currentInput.imageDataForInputCanvasDisplay = imgData; 
                         
                         displayImageDataOnCanvas(currentInput.imageDataForInputCanvasDisplay, inputCanvas, inputCtx, inputPlaceholder);
                         showMessage(isDefault ? 'Default image loaded.' : 'Image loaded.', 'info');
@@ -289,7 +290,7 @@
                     }
                     
                     outputPlaceholder.style.display = 'block'; 
-                    outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height); // Clear previous output
+                    outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
                     outputCanvas.width = 0; outputCanvas.height = 0;
                     debouncedApplyConvolution();
                 };
@@ -301,83 +302,98 @@
                 };
                 img.src = src;
             }
+            
+            // New function to process raw array data (from fetch or file upload)
+            function processRawArrayData(rawArray, isDefault = false) {
+                 try {
+                    if (!Array.isArray(rawArray) || rawArray.length === 0) throw new Error("Invalid JSON: Not an array or empty.");
+
+                    let height = rawArray.length;
+                    let width = 0;
+                    let isGrayscale = false;
+
+                    if (Array.isArray(rawArray[0])) {
+                        width = rawArray[0].length;
+                        if (width === 0) throw new Error("Invalid array: Inner array (width) is empty.");
+                        if (Array.isArray(rawArray[0][0])) { 
+                            if (rawArray[0][0].length !== 3) throw new Error("Invalid RGB: Innermost array must have 3 values.");
+                            isGrayscale = false;
+                        } else if (typeof rawArray[0][0] === 'number') { 
+                            isGrayscale = true;
+                        } else throw new Error("Invalid array: Elements must be numbers or [R,G,B] arrays.");
+                    } else throw new Error("Invalid JSON: Must be 2D or 3D array.");
+                    if (height === 0) throw new Error("Invalid array: Outer array (height) is empty.");
+
+                    currentInput.type = 'array';
+                    currentInput.width = width;
+                    currentInput.height = height;
+                    currentInput.isGrayscaleArray = isGrayscale;
+                    currentInput.dataForConvolution = rawArray;
+
+                    let minVal = Infinity, maxVal = -Infinity;
+                    for (let r = 0; r < height; r++) for (let c = 0; c < width; c++) {
+                        if (isGrayscale) {
+                            const val = rawArray[r][c];
+                            if (typeof val !== 'number') throw new Error("Grayscale array has non-numeric values.");
+                            minVal = Math.min(minVal, val); maxVal = Math.max(maxVal, val);
+                        } else {
+                            for (let ch = 0; ch < 3; ch++) {
+                                const val = rawArray[r][c][ch];
+                                if (typeof val !== 'number') throw new Error("RGB array has non-numeric values.");
+                                minVal = Math.min(minVal, val); maxVal = Math.max(maxVal, val);
+                            }
+                        }
+                    }
+                    if (minVal === Infinity) throw new Error("Array has no numeric data.");
+
+                    const displayImageData = inputCtx.createImageData(width, height);
+                    const data = displayImageData.data;
+                    for (let r = 0; r < height; r++) for (let c = 0; c < width; c++) {
+                        const idx = (r * width + c) * 4;
+                        if (isGrayscale) {
+                            let val = rawArray[r][c];
+                            val = (maxVal === minVal) ? 0 : ((val - minVal) / (maxVal - minVal)) * 255;
+                            data[idx] = data[idx+1] = data[idx+2] = val;
+                        } else {
+                            for (let ch = 0; ch < 3; ch++) {
+                                let val = rawArray[r][c][ch];
+                                val = (maxVal === minVal) ? 0 : ((val - minVal) / (maxVal - minVal)) * 255;
+                                data[idx + ch] = val;
+                            }
+                        }
+                        data[idx + 3] = 255; // Alpha for display
+                    }
+                    currentInput.imageDataForInputCanvasDisplay = displayImageData;
+                    displayImageDataOnCanvas(currentInput.imageDataForInputCanvasDisplay, inputCanvas, inputCtx, inputPlaceholder);
+                    showMessage(isDefault ? 'Default array (JSON) loaded.' : 'Array (JSON) loaded.', 'info');
+                    
+                    outputPlaceholder.style.display = 'block';
+                    outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+                    outputCanvas.width = 0; outputCanvas.height = 0;
+                    debouncedApplyConvolution();
+
+                } catch (err) {
+                    console.error("Error processing array data:", err);
+                    showMessage(`Error: ${err.message}`, 'error');
+                    currentInput.type = null;
+                    inputPlaceholder.textContent = isDefault ? 'Error loading default array.' : 'Error loading array. Check format.';
+                    inputPlaceholder.style.display = 'block';
+                }
+            }
+
 
             function loadAndProcessArrayFile(file) {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     try {
-                        const rawArray = JSON.parse(e.target.result);
-                        if (!Array.isArray(rawArray) || rawArray.length === 0) throw new Error("Invalid JSON: Not an array or empty.");
-
-                        let height = rawArray.length;
-                        let width = 0;
-                        let isGrayscale = false;
-
-                        if (Array.isArray(rawArray[0])) {
-                            width = rawArray[0].length;
-                            if (width === 0) throw new Error("Invalid array: Inner array (width) is empty.");
-                            if (Array.isArray(rawArray[0][0])) { 
-                                if (rawArray[0][0].length !== 3) throw new Error("Invalid RGB: Innermost array must have 3 values.");
-                                isGrayscale = false;
-                            } else if (typeof rawArray[0][0] === 'number') { 
-                                isGrayscale = true;
-                            } else throw new Error("Invalid array: Elements must be numbers or [R,G,B] arrays.");
-                        } else throw new Error("Invalid JSON: Must be 2D or 3D array.");
-                        if (height === 0) throw new Error("Invalid array: Outer array (height) is empty.");
-
-                        currentInput.type = 'array';
-                        currentInput.width = width;
-                        currentInput.height = height;
-                        currentInput.isGrayscaleArray = isGrayscale;
-                        currentInput.dataForConvolution = rawArray;
-
-                        let minVal = Infinity, maxVal = -Infinity;
-                        for (let r = 0; r < height; r++) for (let c = 0; c < width; c++) {
-                            if (isGrayscale) {
-                                const val = rawArray[r][c];
-                                if (typeof val !== 'number') throw new Error("Grayscale array has non-numeric values.");
-                                minVal = Math.min(minVal, val); maxVal = Math.max(maxVal, val);
-                            } else {
-                                for (let ch = 0; ch < 3; ch++) {
-                                    const val = rawArray[r][c][ch];
-                                    if (typeof val !== 'number') throw new Error("RGB array has non-numeric values.");
-                                    minVal = Math.min(minVal, val); maxVal = Math.max(maxVal, val);
-                                }
-                            }
-                        }
-                        if (minVal === Infinity) throw new Error("Array has no numeric data.");
-
-                        const displayImageData = inputCtx.createImageData(width, height);
-                        const data = displayImageData.data;
-                        for (let r = 0; r < height; r++) for (let c = 0; c < width; c++) {
-                            const idx = (r * width + c) * 4;
-                            if (isGrayscale) {
-                                let val = rawArray[r][c];
-                                val = (maxVal === minVal) ? 0 : ((val - minVal) / (maxVal - minVal)) * 255;
-                                data[idx] = data[idx+1] = data[idx+2] = val;
-                            } else {
-                                for (let ch = 0; ch < 3; ch++) {
-                                    let val = rawArray[r][c][ch];
-                                    val = (maxVal === minVal) ? 0 : ((val - minVal) / (maxVal - minVal)) * 255;
-                                    data[idx + ch] = val;
-                                }
-                            }
-                            data[idx + 3] = 255; // Alpha for display
-                        }
-                        currentInput.imageDataForInputCanvasDisplay = displayImageData;
-                        displayImageDataOnCanvas(currentInput.imageDataForInputCanvasDisplay, inputCanvas, inputCtx, inputPlaceholder);
-                        showMessage('Array (JSON) loaded. Raw values for convolution, normalized for display.', 'info');
-                        
-                        outputPlaceholder.style.display = 'block';
-                        outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
-                        outputCanvas.width = 0; outputCanvas.height = 0;
-                        debouncedApplyConvolution();
-
+                        const jsonData = JSON.parse(e.target.result);
+                        processRawArrayData(jsonData, false); // Use the new function
                     } catch (err) {
-                        console.error("Error processing array file:", err);
-                        showMessage(`Error: ${err.message}`, 'error');
+                        // This catch is more for JSON.parse errors, specific format errors handled in processRawArrayData
+                        console.error("Error parsing JSON file:", err);
+                        showMessage(`Error parsing JSON: ${err.message}`, 'error');
                         currentInput.type = null;
-                        inputPlaceholder.textContent = 'Error loading array. Check format.';
+                        inputPlaceholder.textContent = 'Error parsing JSON. Check file.';
                         inputPlaceholder.style.display = 'block';
                     }
                 };
@@ -388,7 +404,6 @@
                 reader.readAsText(file);
             }
             
-            // Single file input handler
             fileLoader.addEventListener('change', (event) => {
                 const file = event.target.files[0];
                 if (!file) return;
@@ -463,7 +478,7 @@
                 if (currentInput.type) { 
                     showMessage('Updating convolution...','info'); 
                     debounceTimeout=setTimeout(applyConvolution,DEBOUNCE_DELAY); 
-                } else if (!defaultImageUrl) { 
+                } else if (!defaultDataUrl) { 
                     showMessage('Upload an image or array to see convolution.','info'); 
                 }
             }
@@ -497,12 +512,12 @@
                                     bSum += dataForConvolution.data[offset+2] * kV;
                                 } else { // type === 'array'
                                     if (isGrayscaleArray) {
-                                        const val = dataForConvolution[pY][pX]; // Raw numeric value
-                                        rSum += val * kV; gSum += val * kV; bSum += val * kV; // Apply to all channels for grayscale
-                                    } else { // RGB array
-                                        rSum += dataForConvolution[pY][pX][0] * kV; // Raw R
-                                        gSum += dataForConvolution[pY][pX][1] * kV; // Raw G
-                                        bSum += dataForConvolution[pY][pX][2] * kV; // Raw B
+                                        const val = dataForConvolution[pY][pX]; 
+                                        rSum += val * kV; gSum += val * kV; bSum += val * kV; 
+                                    } else { 
+                                        rSum += dataForConvolution[pY][pX][0] * kV; 
+                                        gSum += dataForConvolution[pY][pX][1] * kV; 
+                                        bSum += dataForConvolution[pY][pX][2] * kV; 
                                     }
                                 }
                             }
@@ -520,13 +535,10 @@
                 
                 const finalOutputImageData = outputCtx.createImageData(width, height);
                 const outData = finalOutputImageData.data;
-                let outputAlpha = 255; // Default alpha
+                let outputAlpha = 255; 
 
                 if (type === 'array') {
-                    // Ensure imageDataForInputCanvasDisplay and its data property are valid before accessing alpha
                     if (imageDataForInputCanvasDisplay && imageDataForInputCanvasDisplay.data && imageDataForInputCanvasDisplay.data.length > 3) {
-                         // For arrays, the input display alpha is always 255, but we fetch it to be consistent.
-                         // Use alpha from the first pixel of the display version as a representative.
                         outputAlpha = imageDataForInputCanvasDisplay.data[3]; 
                     } else {
                         console.warn("imageDataForInputCanvasDisplay.data not available for alpha, defaulting to 255");
@@ -564,14 +576,13 @@
                     for (let y=0; y<height; y++) for (let x=0; x<width; x++) {
                         const idx = (y*width+x)*4;
                         const {r,g,b} = rawConvolvedValues[y][x];
-                        outData[idx]   = r; // Already in 0-255 range effectively, will be clamped by Uint8ClampedArray
+                        outData[idx]   = r; 
                         outData[idx+1] = g;
                         outData[idx+2] = b;
-                        // For images, use the original alpha from the input image's ImageData
                         if (dataForConvolution && dataForConvolution.data && dataForConvolution.data.length > idx + 3) {
                            outData[idx+3] = dataForConvolution.data[idx+3]; 
                         } else {
-                           outData[idx+3] = 255; // Fallback alpha
+                           outData[idx+3] = 255; 
                         }
                     }
                 }
@@ -581,8 +592,28 @@
 
             // --- Initial Setup ---
             generateKernelInputs(); 
-            if (defaultImageUrl) {
-                loadAndProcessImageSrc(defaultImageUrl,true);
+            if (defaultDataUrl) {
+                if (defaultDataUrl.toLowerCase().endsWith('.json')) {
+                    fetch(defaultDataUrl)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`HTTP error! Status: ${response.status} for ${defaultDataUrl}`);
+                            }
+                            return response.json();
+                        })
+                        .then(jsonData => {
+                            processRawArrayData(jsonData, true);
+                        })
+                        .catch(error => {
+                            console.error("Error fetching or parsing default JSON:", error);
+                            showMessage(`Error loading default array: ${error.message}. Try uploading manually.`, 'error');
+                            inputPlaceholder.textContent = 'Error loading default array.';
+                            inputPlaceholder.style.display = 'block';
+                            currentInput.type = null;
+                        });
+                } else { // Assume it's an image URL
+                    loadAndProcessImageSrc(defaultDataUrl, true);
+                }
             } else { 
                 showMessage('Upload an image or array (JSON) to begin.','info'); 
                 inputPlaceholder.textContent='Upload input data to see it here'; 
